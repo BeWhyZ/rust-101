@@ -1,5 +1,12 @@
 // an ok unsafe queue
 
+// using raw pointer for the type, and don't mixed the safe pointer and raw pointer
+// The clean way to implement this by using a smart pointer function to convert itself into a raw pointer.
+// This transfers the responsibility for the previously managed memory. To release the memory, convert the raw pointer back into a smart pointer,
+// and the default drop will correctly handle memory release.
+// smart pointer -> raw pointer -> smart pointer
+// start with safe stuff, turn into into raw pointers, and then only convert back to safe stuff at the end (when we want to Drop it).
+
 use std::{mem, ptr};
 
 pub struct List<T> {
@@ -8,7 +15,7 @@ pub struct List<T> {
 }
 
 
-type Link<T> = Option<Box<Node<T>>>;
+type Link<T> = *mut Node<T>;
 
 
 struct Node<T> {
@@ -18,40 +25,52 @@ struct Node<T> {
 
 impl<T> List<T>{
     pub fn new()-> Self {
-        List { head: None, tail: ptr::null_mut() }
+        List { head: ptr::null_mut(), tail: ptr::null_mut() }
     }
 
     pub fn push(&mut self, elem:T) {
-        let mut new_tail = Box::new(Node{
-            elem:elem,
-            next:None
-        });
-        // How do we make a raw pointer from a normal pointer? Coercions! If a variable is declared to be a raw pointer, a normal reference will coerce into it:
-        let raw_tail: *mut _ = &mut *new_tail;
-        if !self.tail.is_null(){
-            unsafe {
-                (*self.tail).next = Some(new_tail);
+        unsafe {
+            let new_tail = Box::into_raw(Box::new(Node{
+                elem:elem,
+                next:ptr::null_mut(),
+            }));
+
+            if !self.tail.is_null(){
+                (*self.tail).next = new_tail;
+            } else {
+                self.head = new_tail;
             }
-        } else {
-            self.head = Some(new_tail);
+
+            self.tail = new_tail
         }
-        self.tail = raw_tail;
     }
 
     pub fn pop(&mut self) -> Option<T> {
-        self.head.take().map(|head|{
-            let head = *head;
-            self.head = head.next;
+        unsafe{
+            if !self.head.is_null(){
+                let head = Box::from_raw(self.head);
+                self.head = head.next;
 
-            if self.head.is_none(){
-                self.tail = ptr::null_mut();
+                // also modify the tail
+                if self.head.is_null(){
+                    self.tail = ptr::null_mut();
+                }
+
+                Some(head.elem)
+
+            } else {
+                None
             }
-
-            head.elem
-        })
-
+        }
     }
 }
+
+impl<T> Drop for List<T>{
+    fn drop(&mut self){
+        while let Some(_) = self.pop(){}
+    }
+}
+
 
 #[cfg(test)]
 mod tests{
